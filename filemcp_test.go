@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -24,9 +25,11 @@ func TestRootDirectory(t *testing.T) {
 		t.Fatalf("Mkdir(%s) failed with %s", tempSubdir, err)
 	}
 	tempSymlink := filepath.Join(tempDir, "symlink")
-	err = os.Symlink(tempSubdir, tempSymlink)
-	if err != nil {
-		t.Fatalf("Symlink(%s) failed with %s", tempSymlink, err)
+	if runtime.GOOS != "windows" {
+		err = os.Symlink(tempSubdir, tempSymlink)
+		if err != nil {
+			t.Fatalf("Symlink(%s) failed with %s", tempSymlink, err)
+		}
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -38,6 +41,7 @@ func TestRootDirectory(t *testing.T) {
 		args []string
 		r    string
 		fail bool
+		goos string
 	}{
 		{args: []string{}, r: cwd},
 		{args: []string{"."}, r: cwd},
@@ -46,16 +50,23 @@ func TestRootDirectory(t *testing.T) {
 		{args: []string{"arg1", "arg2", "arg3"}, fail: true},
 		{args: []string{"/bad/dog/food"}, fail: true},
 		{args: []string{tempFile}, fail: true},
-		{args: []string{"/"}, r: "/"},
+		{args: []string{"/"}, r: "/", goos: "linux"},
+		{args: []string{"/"}, r: "/", goos: "darwin"},
+		{args: []string{"/"}, r: `C:\`, goos: "windows"},
 		{args: []string{homeDir}, r: homeDir},
 		{args: []string{"/", homeDir}, fail: true},
 		{args: []string{homeDir, "/"}, fail: true},
-		{args: []string{tempSymlink}, r: tempSymlink},
+		{args: []string{tempSymlink}, r: tempSymlink, goos: "linux"},
+		{args: []string{tempSymlink}, r: tempSymlink, goos: "darwin"},
 		{args: []string{tempSubdir}, r: tempSubdir},
 		{args: []string{"./."}, r: cwd},
 	}
 
 	for _, c := range cases {
+		if c.goos != "" && runtime.GOOS != c.goos {
+			continue
+		}
+
 		r, err := rootDirectory(c.args)
 		if err != nil {
 			if !c.fail {
