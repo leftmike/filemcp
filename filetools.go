@@ -2,28 +2,15 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func sanitizePath(rootDir, path string) (string, error) {
-	if filepath.IsAbs(path) {
-		return "", fmt.Errorf("bad path: %s", path)
-	}
-	path = filepath.Join(rootDir, filepath.Clean(path))
-	if !strings.HasPrefix(path, rootDir) {
-		return "", fmt.Errorf("bad path: %s", path)
-	}
-	return path, nil
-}
-
 type fileTools struct {
-	rootDir string
+	fs fs.FS
 }
 
 type readFileInput struct {
@@ -39,19 +26,30 @@ type readFileOutput struct {
 func (ft fileTools) handleReadFile(ctx context.Context, req *mcp.CallToolRequest,
 	args readFileInput) (*mcp.CallToolResult, readFileOutput, error) {
 
-	path, err := sanitizePath(ft.rootDir, args.Path)
+	cnt, err := ft.readFile(ctx, args.Path)
 	if err != nil {
 		return nil, readFileOutput{}, err
 	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, readFileOutput{}, err
-	}
+
 	return nil, readFileOutput{
-		Content: string(content),
-		Size:    len(content),
+		Content: string(cnt),
+		Size:    len(cnt),
 		Path:    args.Path,
 	}, nil
+}
+
+func (ft fileTools) readFile(ctx context.Context, path string) ([]byte, error) {
+	fh, err := ft.fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+
+	cnt, err := io.ReadAll(fh)
+	if err != nil {
+		return nil, err
+	}
+	return cnt, nil
 }
 
 type listDirectoryInput struct {
@@ -73,20 +71,34 @@ type listDirectoryOutput struct {
 func (ft fileTools) handleListDirectory(ctx context.Context, req *mcp.CallToolRequest,
 	args listDirectoryInput) (*mcp.CallToolResult, listDirectoryOutput, error) {
 
-	path, err := sanitizePath(ft.rootDir, args.Path)
+	entries, err := ft.listDirectory(ctx, args.Path)
 	if err != nil {
 		return nil, listDirectoryOutput{}, err
 	}
-	lst, err := os.ReadDir(path)
+
+	return nil, listDirectoryOutput{
+		Path:    args.Path,
+		Entries: entries,
+		Count:   len(entries),
+	}, nil
+}
+
+func (ft fileTools) listDirectory(ctx context.Context, path string) ([]directoryEntry, error) {
+	if path == "" {
+		path = "."
+	}
+	lst, err := fs.ReadDir(ft.fs, path)
 	if err != nil {
-		return nil, listDirectoryOutput{}, err
+		return nil, err
 	}
 
 	var entries []directoryEntry
 	for _, de := range lst {
 		var sz int64
-		if fi, err := de.Info(); err == nil {
-			sz = fi.Size()
+		if !de.IsDir() {
+			if fi, err := de.Info(); err == nil {
+				sz = fi.Size()
+			}
 		}
 
 		entries = append(entries, directoryEntry{
@@ -96,11 +108,7 @@ func (ft fileTools) handleListDirectory(ctx context.Context, req *mcp.CallToolRe
 		})
 	}
 
-	return nil, listDirectoryOutput{
-		Path:    args.Path,
-		Entries: entries,
-		Count:   len(entries),
-	}, nil
+	return entries, nil
 }
 
 type searchFilesInput struct {
@@ -117,7 +125,7 @@ func (ft fileTools) handleSearchFiles(ctx context.Context, req *mcp.CallToolRequ
 	args searchFilesInput) (*mcp.CallToolResult, searchFilesOutput, error) {
 
 	var matches []string
-	err := filepath.WalkDir(ft.rootDir, func(path string, de fs.DirEntry, err error) error {
+	err := fs.WalkDir(ft.fs, ".", func(path string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -125,16 +133,12 @@ func (ft fileTools) handleSearchFiles(ctx context.Context, req *mcp.CallToolRequ
 			return nil
 		}
 
-		matched, err := filepath.Match(args.Pattern, filepath.Base(path))
+		matched, err := filepath.Match(args.Pattern, de.Name())
 		if err != nil {
 			return err
 		}
 
 		if matched {
-			path, err = filepath.Rel(ft.rootDir, path)
-			if err != nil {
-				return err
-			}
 			matches = append(matches, path)
 		}
 		return nil
@@ -165,11 +169,7 @@ type getFileInfoOutput struct {
 func (ft fileTools) handleGetFileInfo(ctx context.Context, req *mcp.CallToolRequest,
 	args getFileInfoInput) (*mcp.CallToolResult, getFileInfoOutput, error) {
 
-	path, err := sanitizePath(ft.rootDir, args.Path)
-	if err != nil {
-		return nil, getFileInfoOutput{}, err
-	}
-	fi, err := os.Stat(path)
+	fi, err := fs.Stat(ft.fs, args.Path)
 	if err != nil {
 		return nil, getFileInfoOutput{}, err
 	}

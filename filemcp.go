@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,15 +43,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %s", os.Args[0], err)
+		os.Exit(1)
+	}
+	defer root.Close()
+
 	srvr := mcp.NewServer(&mcp.Implementation{
 		Name:    "filemcp",
 		Version: "0.1.0",
 	}, nil)
 
 	ft := fileTools{
-		rootDir: rootDir,
+		fs: root.FS(),
 	}
 	ft.registerTools(srvr)
 
-	// XXX: run server
+	ctx := context.Background()
+	err = srvr.Run(ctx, &mcp.StdioTransport{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %s", os.Args[0], err)
+		os.Exit(1)
+	}
 }
