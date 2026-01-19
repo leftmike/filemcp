@@ -218,3 +218,152 @@ func TestListDirectoryEscape(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchFiles(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mustWriteFile(t, filepath.Join(tempDir, "file1.txt"), []byte("content1"))
+	mustWriteFile(t, filepath.Join(tempDir, "file2.txt"), []byte("content2"))
+	mustWriteFile(t, filepath.Join(tempDir, "readme.md"), []byte("readme"))
+	mustWriteFile(t, filepath.Join(tempDir, "main.go"), []byte("package main"))
+	mustWriteFile(t, filepath.Join(tempDir, "subdir", "nested.txt"), []byte("nested"))
+	mustWriteFile(t, filepath.Join(tempDir, "subdir", "other.go"), []byte("package other"))
+	mustWriteFile(t, filepath.Join(tempDir, "deep", "dir", "file.txt"), []byte("deep"))
+	mustWriteFile(t, filepath.Join(tempDir, ".hidden"), []byte("hidden"))
+
+	cases := []struct {
+		pattern string
+		matches []string
+		fail    bool
+	}{
+		{
+			pattern: "*.txt",
+			matches: []string{"deep/dir/file.txt", "file1.txt", "file2.txt", "subdir/nested.txt"},
+		},
+		{
+			pattern: "*.go",
+			matches: []string{"main.go", "subdir/other.go"},
+		},
+		{
+			pattern: "*.md",
+			matches: []string{"readme.md"},
+		},
+		{
+			pattern: "file*.txt",
+			matches: []string{"deep/dir/file.txt", "file1.txt", "file2.txt"},
+		},
+		{
+			pattern: ".*",
+			matches: []string{".hidden"},
+		},
+		{
+			pattern: "*.xyz",
+			matches: nil,
+		},
+		{
+			pattern: "*",
+			matches: []string{
+				".hidden", "deep/dir/file.txt", "file1.txt", "file2.txt",
+				"main.go", "readme.md", "subdir/nested.txt", "subdir/other.go",
+			},
+		},
+		{pattern: "[", fail: true},
+	}
+
+	ft := fileTools{fs: os.DirFS(tempDir)}
+	ctx := context.Background()
+
+	for _, c := range cases {
+		matches, err := ft.searchFiles(ctx, c.pattern)
+		if err != nil {
+			if !c.fail {
+				t.Errorf("searchFiles(%s) failed with %s", c.pattern, err)
+			}
+		} else if c.fail {
+			t.Errorf("searchFiles(%s) did not fail", c.pattern)
+		} else {
+			slices.Sort(matches)
+			slices.Sort(c.matches)
+			if !reflect.DeepEqual(matches, c.matches) {
+				t.Errorf("searchFiles(%s) got %v, want %v", c.pattern, matches, c.matches)
+			}
+		}
+	}
+}
+
+func TestGetFileInfo(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mustWriteFile(t, filepath.Join(tempDir, "file.txt"), []byte("content"))
+	mustWriteFile(t, filepath.Join(tempDir, "subdir", "nested.txt"), []byte("nested content"))
+
+	cases := []struct {
+		path  string
+		size  int64
+		isDir bool
+		fail  bool
+	}{
+		{path: "file.txt", size: 7},
+		{path: "subdir/nested.txt", size: 14},
+		{path: "subdir", isDir: true},
+		{path: ".", isDir: true},
+		{path: "missing.txt", fail: true},
+		{path: "nodir/file.txt", fail: true},
+	}
+
+	ft := fileTools{fs: os.DirFS(tempDir)}
+	ctx := context.Background()
+
+	for _, c := range cases {
+		fi, err := ft.getFileInfo(ctx, c.path)
+		if err != nil {
+			if !c.fail {
+				t.Errorf("getFileInfo(%s) failed with %s", c.path, err)
+			}
+		} else if c.fail {
+			t.Errorf("getFileInfo(%s) did not fail", c.path)
+		} else {
+			if fi.IsDir() != c.isDir {
+				t.Errorf("getFileInfo(%s) isDir=%v, want %v", c.path, fi.IsDir(), c.isDir)
+			}
+			if !c.isDir && fi.Size() != c.size {
+				t.Errorf("getFileInfo(%s) size=%d, want %d", c.path, fi.Size(), c.size)
+			}
+		}
+	}
+}
+
+func TestGetFileInfoEscape(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mustWriteFile(t, filepath.Join(tempDir, "inside.txt"), []byte("inside"))
+
+	outsideFile := filepath.Join(filepath.Dir(tempDir), "outside.txt")
+	mustWriteFile(t, outsideFile, []byte("outside"))
+	defer os.Remove(outsideFile)
+
+	ft := fileTools{fs: os.DirFS(tempDir)}
+	ctx := context.Background()
+
+	fi, err := ft.getFileInfo(ctx, "inside.txt")
+	if err != nil {
+		t.Errorf("getFileInfo(inside.txt) failed with %s", err)
+	} else if fi.Size() != 6 {
+		t.Errorf("getFileInfo(inside.txt) size=%d, want 6", fi.Size())
+	}
+
+	mustFailPaths := []string{
+		"../outside.txt",
+		"../../outside.txt",
+		"../../../etc/passwd",
+		"/etc/passwd",
+		"./../outside.txt",
+	}
+
+	for _, path := range mustFailPaths {
+		_, err := ft.getFileInfo(ctx, path)
+		if err == nil {
+			t.Errorf("getFileInfo(%s) did not fail", path)
+		}
+	}
+}

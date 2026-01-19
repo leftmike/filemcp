@@ -124,25 +124,7 @@ type searchFilesOutput struct {
 func (ft fileTools) handleSearchFiles(ctx context.Context, req *mcp.CallToolRequest,
 	args searchFilesInput) (*mcp.CallToolResult, searchFilesOutput, error) {
 
-	var matches []string
-	err := fs.WalkDir(ft.fs, ".", func(path string, de fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if de.IsDir() {
-			return nil
-		}
-
-		matched, err := filepath.Match(args.Pattern, de.Name())
-		if err != nil {
-			return err
-		}
-
-		if matched {
-			matches = append(matches, path)
-		}
-		return nil
-	})
+	matches, err := ft.searchFiles(ctx, args.Pattern)
 	if err != nil {
 		return nil, searchFilesOutput{}, err
 	}
@@ -152,6 +134,33 @@ func (ft fileTools) handleSearchFiles(ctx context.Context, req *mcp.CallToolRequ
 		Matches: matches,
 		Count:   len(matches),
 	}, nil
+}
+
+func (ft fileTools) searchFiles(ctx context.Context, pattern string) ([]string, error) {
+	var matches []string
+	err := fs.WalkDir(ft.fs, ".", func(path string, de fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if de.IsDir() {
+			return nil
+		}
+
+		matched, err := filepath.Match(pattern, de.Name())
+		if err != nil {
+			return err
+		}
+
+		if matched {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
 }
 
 type getFileInfoInput struct {
@@ -169,7 +178,7 @@ type getFileInfoOutput struct {
 func (ft fileTools) handleGetFileInfo(ctx context.Context, req *mcp.CallToolRequest,
 	args getFileInfoInput) (*mcp.CallToolResult, getFileInfoOutput, error) {
 
-	fi, err := fs.Stat(ft.fs, args.Path)
+	fi, err := ft.getFileInfo(ctx, args.Path)
 	if err != nil {
 		return nil, getFileInfoOutput{}, err
 	}
@@ -180,6 +189,10 @@ func (ft fileTools) handleGetFileInfo(ctx context.Context, req *mcp.CallToolRequ
 		ModTime: fi.ModTime().Format("2006-01-02T15:04:05Z07:00"),
 		Mode:    fi.Mode().String(),
 	}, nil
+}
+
+func (ft fileTools) getFileInfo(ctx context.Context, path string) (fs.FileInfo, error) {
+	return fs.Stat(ft.fs, path)
 }
 
 func (ft fileTools) registerTools(srvr *mcp.Server) {
