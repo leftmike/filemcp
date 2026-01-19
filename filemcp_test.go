@@ -43,7 +43,7 @@ func TestRootDirectory(t *testing.T) {
 		fail bool
 		goos string
 	}{
-		{args: []string{}, r: cwd},
+		{args: []string{}, r: homeDir},
 		{args: []string{"."}, r: cwd},
 		{args: []string{tempDir}, r: tempDir},
 		{args: []string{"arg1", "arg2"}, fail: true},

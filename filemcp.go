@@ -1,3 +1,11 @@
+/*
+To Do:
+- Support either stdio or http
+- Add logging to a file
+- Use https
+- Authenticate with a shared secret
+*/
+
 package main
 
 import (
@@ -14,7 +22,11 @@ func rootDirectory(args []string) (string, error) {
 	var rootDir string
 	switch len(args) {
 	case 0:
-		rootDir = "."
+		var err error
+		rootDir, err = os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
 	case 1:
 		rootDir = args[0]
 	default:
