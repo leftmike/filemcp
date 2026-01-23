@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"log/slog"
 	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +26,8 @@ type readFileOutput struct {
 
 func (ft fileTools) handleReadFile(ctx context.Context, req *mcp.CallToolRequest,
 	args readFileInput) (*mcp.CallToolResult, readFileOutput, error) {
+
+	slog.Info("read file", slog.Any("req", req), slog.Any("args", args))
 
 	cnt, err := ft.readFile(ctx, args.Path)
 	if err != nil {
@@ -70,6 +73,8 @@ type listDirectoryOutput struct {
 
 func (ft fileTools) handleListDirectory(ctx context.Context, req *mcp.CallToolRequest,
 	args listDirectoryInput) (*mcp.CallToolResult, listDirectoryOutput, error) {
+
+	slog.Info("list directory", slog.Any("req", req), slog.Any("args", args))
 
 	entries, err := ft.listDirectory(ctx, args.Path)
 	if err != nil {
@@ -124,6 +129,8 @@ type searchFilesOutput struct {
 func (ft fileTools) handleSearchFiles(ctx context.Context, req *mcp.CallToolRequest,
 	args searchFilesInput) (*mcp.CallToolResult, searchFilesOutput, error) {
 
+	slog.Info("search files", slog.Any("req", req), slog.Any("args", args))
+
 	matches, err := ft.searchFiles(ctx, args.Pattern)
 	if err != nil {
 		return nil, searchFilesOutput{}, err
@@ -177,6 +184,8 @@ type getFileInfoOutput struct {
 
 func (ft fileTools) handleGetFileInfo(ctx context.Context, req *mcp.CallToolRequest,
 	args getFileInfoInput) (*mcp.CallToolResult, getFileInfoOutput, error) {
+
+	slog.Info("get file info", slog.Any("req", req), slog.Any("args", args))
 
 	fi, err := ft.getFileInfo(ctx, args.Path)
 	if err != nil {
