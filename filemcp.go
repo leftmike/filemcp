@@ -74,6 +74,24 @@ func setupLogging(log bool, logfile string) {
 	}
 }
 
+func setupTransport(logProto string, t mcp.Transport) mcp.Transport {
+	if logProto != "" {
+		file, err := os.OpenFile(logProto, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			slog.Error("open file", slog.String("logproto", logProto),
+				slog.String("error", err.Error()))
+			return t
+		}
+
+		return &mcp.LoggingTransport{
+			Transport: t,
+			Writer:    file,
+		}
+	}
+
+	return t
+}
+
 func fatal(err error) {
 	slog.Error(err.Error())
 	fmt.Fprintf(os.Stderr, "%s: %s", os.Args[0], err)
@@ -83,9 +101,11 @@ func fatal(err error) {
 func main() {
 	var log bool
 	var logfile string
+	var logProto string
 
 	flag.BoolVar(&log, "log", false, "enable logging")
 	flag.StringVar(&logfile, "logfile", "", "log file path")
+	flag.StringVar(&logProto, "logproto", "", "protocol log file path")
 	flag.Parse()
 
 	setupLogging(log, logfile)
@@ -114,7 +134,7 @@ func main() {
 	ft.registerTools(srvr)
 
 	ctx := context.Background()
-	err = srvr.Run(ctx, &mcp.StdioTransport{})
+	err = srvr.Run(ctx, setupTransport(logProto, &mcp.StdioTransport{}))
 	if err != nil {
 		fatal(err)
 	}
