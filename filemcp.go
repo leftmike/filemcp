@@ -1,7 +1,5 @@
 /*
 To Do:
-- Support either stdio or sse or http
-- Use https
 - Authenticate with a shared secret
 */
 
@@ -12,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,11 +101,35 @@ func main() {
 	var log bool
 	var logfile string
 	var logProto string
+	var useStdio bool
+	var useSSE bool
+	var useHTTP bool
+	var httpsAddr string
+	var tlsCert string
+	var tlsKey string
 
 	flag.BoolVar(&log, "log", false, "enable logging")
 	flag.StringVar(&logfile, "logfile", "", "log file path")
 	flag.StringVar(&logProto, "logproto", "", "protocol log file path")
+	flag.BoolVar(&useStdio, "stdio", false, "use stdio transport")
+	flag.BoolVar(&useSSE, "sse", false, "use SSE transport at /sse (requires -cert and -key)")
+	flag.BoolVar(&useHTTP, "http", false, "use streaming HTTP transport at /mcp (requires -cert and -key)")
+	flag.StringVar(&httpsAddr, "addr", ":8443", "HTTPS server address")
+	flag.StringVar(&tlsCert, "cert", "", "TLS certificate file (required for -sse or -http)")
+	flag.StringVar(&tlsKey, "key", "", "TLS key file (required for -sse or -http)")
 	flag.Parse()
+
+	if !useStdio && !useSSE && !useHTTP {
+		fmt.Fprintf(os.Stderr, "at least one of -stdio, -sse, or -http must be specified\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if (useSSE || useHTTP) && (tlsCert == "" || tlsKey == "") {
+		fmt.Fprintf(os.Stderr, "-cert and -key are required for -sse or -http transport\n")
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	setupLogging(log, logfile)
 	slog.Info("starting", slog.String("cmd", os.Args[0]),
@@ -134,7 +157,49 @@ func main() {
 	ft.registerTools(srvr)
 
 	ctx := context.Background()
-	err = srvr.Run(ctx, setupTransport(logProto, &mcp.StdioTransport{}))
+
+	useHTTPS := useSSE || useHTTP
+	numTransports := 0
+	if useHTTPS {
+		numTransports++
+	}
+	if useStdio {
+		numTransports++
+	}
+
+	errChan := make(chan error, numTransports)
+
+	if useHTTPS {
+		mux := http.NewServeMux()
+		if useSSE {
+			slog.Info("adding SSE handler", slog.String("path", "/sse"))
+			mux.Handle("/sse", mcp.NewSSEHandler(func(r *http.Request) *mcp.Server {
+				return srvr
+			}, nil))
+		}
+		if useHTTP {
+			slog.Info("adding streaming HTTP handler", slog.String("path", "/mcp"))
+			mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+				return srvr
+			}, nil))
+		}
+
+		go func() {
+			slog.Info("starting HTTPS server", slog.String("addr", httpsAddr))
+			errChan <- http.ListenAndServeTLS(httpsAddr, tlsCert, tlsKey, mux)
+		}()
+	}
+
+	if useStdio {
+		go func() {
+			slog.Info("starting stdio transport")
+			errChan <- srvr.Run(ctx, setupTransport(logProto, &mcp.StdioTransport{}))
+		}()
+	}
+
+	// Wait for any transport to fail
+	err = <-errChan
+
 	if err != nil {
 		fatal(err)
 	}
