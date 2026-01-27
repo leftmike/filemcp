@@ -1,6 +1,9 @@
 /*
 To Do:
 - Authenticate with a shared secret
+- Add protocol logging for sse and streaming transports
+
+- https://github.com/FiloSottile/mkcert
 */
 
 package main
@@ -48,13 +51,6 @@ func rootDirectory(args []string) (string, error) {
 	return rootDir, nil
 }
 
-type discardHandler struct{}
-
-func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
-func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
-func (dh discardHandler) WithAttrs([]slog.Attr) slog.Handler     { return dh }
-func (dh discardHandler) WithGroup(string) slog.Handler          { return dh }
-
 func setupLogging(log bool, logfile string) {
 	if log {
 		if logfile != "" {
@@ -69,7 +65,7 @@ func setupLogging(log bool, logfile string) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 		}
 	} else {
-		slog.SetDefault(slog.New(discardHandler{}))
+		slog.SetDefault(slog.New(slog.DiscardHandler))
 	}
 }
 
@@ -77,8 +73,7 @@ func setupTransport(logProto string, t mcp.Transport) mcp.Transport {
 	if logProto != "" {
 		file, err := os.OpenFile(logProto, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			slog.Error("open file", slog.String("logproto", logProto),
-				slog.String("error", err.Error()))
+			slog.Error("open file", "logproto", logProto, "error", err)
 			return t
 		}
 
@@ -132,8 +127,8 @@ func main() {
 	}
 
 	setupLogging(log, logfile)
-	slog.Info("starting", slog.String("cmd", os.Args[0]),
-		slog.String("args", strings.Join(os.Args[1:], " ")), slog.Int("pid", os.Getpid()))
+	slog.Info("starting", "cmd", os.Args[0], "args", strings.Join(os.Args[1:], " "),
+		"pid", os.Getpid())
 
 	rootDir, err := rootDirectory(flag.Args())
 	if err != nil {
@@ -172,20 +167,20 @@ func main() {
 	if useHTTPS {
 		mux := http.NewServeMux()
 		if useSSE {
-			slog.Info("adding SSE handler", slog.String("path", "/sse"))
+			slog.Info("adding SSE handler", "path", "/sse")
 			mux.Handle("/sse", mcp.NewSSEHandler(func(r *http.Request) *mcp.Server {
 				return srvr
 			}, nil))
 		}
 		if useHTTP {
-			slog.Info("adding streaming HTTP handler", slog.String("path", "/mcp"))
+			slog.Info("adding streaming HTTP handler", "path", "/mcp")
 			mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 				return srvr
 			}, nil))
 		}
 
 		go func() {
-			slog.Info("starting HTTPS server", slog.String("addr", httpsAddr))
+			slog.Info("starting HTTPS server", "addr", httpsAddr)
 			errChan <- http.ListenAndServeTLS(httpsAddr, tlsCert, tlsKey, mux)
 		}()
 	}
@@ -204,6 +199,6 @@ func main() {
 		fatal(err)
 	}
 
-	slog.Info("exiting", slog.String("cmd", os.Args[0]),
-		slog.String("args", strings.Join(os.Args[1:], " ")), slog.Int("pid", os.Getpid()))
+	slog.Info("exiting", "cmd", os.Args[0], "args", strings.Join(os.Args[1:], " "),
+		"pid", os.Getpid())
 }
